@@ -7,6 +7,7 @@ ingest/smart.py — конвертация PDF через Gemini Vision.
 - таблицы и схемы
 """
 
+import io
 import logging
 import math
 from pathlib import Path
@@ -40,38 +41,34 @@ BATCH_PAGES = 30  # страниц за один запрос к Gemini
 
 
 def _convert_pages(pdf_path: Path, start: int, end: int) -> str:
-    """Конвертирует страницы [start, end) одного PDF через Gemini."""
-    import tempfile, os
+    """Конвертирует страницы [start, end) через Gemini — без временных файлов."""
     doc = pymupdf.open(str(pdf_path))
     batch_doc = pymupdf.open()
     for i in range(start, min(end, len(doc))):
         batch_doc.insert_pdf(doc, from_page=i, to_page=i)
-
-    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-        tmp_path = tmp.name
-    batch_doc.save(tmp_path)
+    pdf_bytes = batch_doc.tobytes()
     batch_doc.close()
     doc.close()
 
+    uploaded = _genai.files.upload(
+        file=io.BytesIO(pdf_bytes),
+        config=genai_types.UploadFileConfig(mime_type="application/pdf"),
+    )
     try:
-        uploaded = _genai.files.upload(file=tmp_path)
-        try:
-            response = _genai.models.generate_content(
-                model=PDF_PROCESSING_MODEL,
-                contents=[uploaded, PROMPT],
-                config=genai_types.GenerateContentConfig(max_output_tokens=8192),
-            )
-            text = response.text or ""
-            # убираем случайные код-блоки от Gemini
-            if text.startswith("```"):
-                text = text.split("\n", 1)[-1]
-            if text.rstrip().endswith("```"):
-                text = text.rstrip()[:-3].rstrip()
-            return text
-        finally:
-            _genai.files.delete(name=uploaded.name)
+        response = _genai.models.generate_content(
+            model=PDF_PROCESSING_MODEL,
+            contents=[uploaded, PROMPT],
+            config=genai_types.GenerateContentConfig(max_output_tokens=8192),
+        )
+        text = response.text or ""
+        # убираем случайные код-блоки от Gemini
+        if text.startswith("```"):
+            text = text.split("\n", 1)[-1]
+        if text.rstrip().endswith("```"):
+            text = text.rstrip()[:-3].rstrip()
+        return text
     finally:
-        os.unlink(tmp_path)
+        _genai.files.delete(name=uploaded.name)
 
 
 def convert(pdf_path: Path) -> str:
