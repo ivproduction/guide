@@ -11,7 +11,7 @@ import logging
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-from app.config import TELEGRAM_BOT_TOKEN, TELEGRAM_MODE, WEBHOOK_URL, WEBHOOK_PATH, WEBHOOK_SECRET, RATE_LIMIT_REQUESTS, RATE_LIMIT_DAYS
+from app.config import TELEGRAM_BOT_TOKEN, TELEGRAM_MODE, WEBHOOK_URL, WEBHOOK_PATH, WEBHOOK_SECRET, RATE_LIMIT_REQUESTS, RATE_LIMIT_DAYS, RATE_LIMIT_WHITELIST
 from app.services.cache import check_rate_limit, get_cached
 from app.services.rag import ask as rag_ask
 
@@ -61,7 +61,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     # Проверяем лимит только если ответа нет в кэше
     if not await get_cached(question):
-        allowed, _ = await check_rate_limit(user_id)
+        whitelisted = user_id in RATE_LIMIT_WHITELIST
+        allowed, _ = await check_rate_limit(user_id, whitelisted=whitelisted)
         if not allowed:
             await update.message.reply_text(
                 f"⚠️ Вы достигли лимита {RATE_LIMIT_REQUESTS} вопросов за {RATE_LIMIT_DAYS} дня.\n"

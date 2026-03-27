@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 from qdrant_client import QdrantClient
 from qdrant_client.models import FieldCondition, Filter, MatchValue, Range
 
-from app.config import ADMIN_API_KEY, DOCS_DIR, QDRANT_HOST, QDRANT_PORT, RAW_DIR, collection_name
+from app.config import ADMIN_API_KEY, DOCS_DIR, QDRANT_HOST, QDRANT_PORT, RAW_DIR, RATE_LIMIT_DAYS, RATE_LIMIT_REQUESTS, RATE_LIMIT_WHITELIST, collection_name
 from app.ingest import convert_file
 from app.ragas import evaluate_rag
 from app.ragas.questions import QUESTIONS as _DEFAULT_QUESTIONS
@@ -386,6 +386,28 @@ async def flush_cache():
 
 
 # ── Статус коллекций ──────────────────────────────────────────
+
+# ── Rate limit ────────────────────────────────────────────────
+
+@router.get("/ratelimit", summary="Все пользователи и использование rate limit")
+async def ratelimit_list():
+    """Список всех активных счётчиков: user_id, использовано, осталось, TTL."""
+    from app.services.cache import get_all_rate_limits
+    entries = await get_all_rate_limits()
+    for e in entries:
+        e["whitelisted"] = e["user_id"] in RATE_LIMIT_WHITELIST
+    return {"limit": RATE_LIMIT_REQUESTS, "window_days": RATE_LIMIT_DAYS, "users": entries}
+
+
+@router.delete("/ratelimit/{user_id}", summary="Сбросить rate limit пользователя")
+async def ratelimit_reset(user_id: int):
+    """Удаляет счётчик запросов для указанного user_id."""
+    from app.services.cache import reset_rate_limit
+    existed = await reset_rate_limit(user_id)
+    if not existed:
+        raise HTTPException(status_code=404, detail=f"user_id={user_id} не найден")
+    return {"user_id": user_id, "reset": True}
+
 
 @router.get("/collections", summary="Статус всех коллекций Qdrant")
 def collections_status():

@@ -10,6 +10,9 @@ REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
 CACHE_TTL_DAYS: int = int(os.getenv("CACHE_TTL_DAYS", "30"))
 RATE_LIMIT_REQUESTS: int = int(os.getenv("RATE_LIMIT_REQUESTS", "20"))
 RATE_LIMIT_DAYS: int = int(os.getenv("RATE_LIMIT_DAYS", "3"))
+RATE_LIMIT_WHITELIST: set[int] = {
+    int(x) for x in os.getenv("RATE_LIMIT_WHITELIST", "").split(",") if x.strip()
+}
 HISTORY_TTL_DAYS: int = int(os.getenv("HISTORY_TTL_DAYS", "14"))
 HISTORY_MAX_MESSAGES: int = int(os.getenv("HISTORY_MAX_MESSAGES", "28"))
 QDRANT_HOST: str = os.getenv("QDRANT_HOST", "localhost")

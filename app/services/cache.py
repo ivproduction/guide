@@ -123,10 +123,11 @@ def _ratelimit_key(user_id: int) -> str:
     return f"ratelimit:{user_id}"
 
 
-async def check_rate_limit(user_id: int) -> tuple[bool, int]:
+async def check_rate_limit(user_id: int, whitelisted: bool = False) -> tuple[bool, int]:
     """
     Проверяет и инкрементирует счётчик запросов пользователя.
-    Возвращает (allowed, remaining) — разрешён ли запрос и сколько осталось.
+    Возвращает (allowed, remaining).
+    whitelisted=True — счётчик пишется, но allowed всегда True.
     """
     try:
         r = get_redis()
@@ -135,10 +136,44 @@ async def check_rate_limit(user_id: int) -> tuple[bool, int]:
         if count == 1:
             await r.expire(key, RATE_LIMIT_DAYS * 86400)
         remaining = max(0, RATE_LIMIT_REQUESTS - count)
+        if whitelisted:
+            return True, remaining
         allowed = count <= RATE_LIMIT_REQUESTS
         if not allowed:
             log.warning("rate limit exceeded: user_id=%d count=%d", user_id, count)
         return allowed, remaining
     except Exception as e:
         log.warning("rate limit error: %s", e)
-        return True, RATE_LIMIT_REQUESTS  # при ошибке Redis — пропускаем
+        return True, RATE_LIMIT_REQUESTS
+
+
+async def get_all_rate_limits() -> list[dict]:
+    """Возвращает все активные счётчики rate limit."""
+    try:
+        r = get_redis()
+        keys = await r.keys("ratelimit:*")
+        result = []
+        for key in keys:
+            user_id = int(key.split(":")[1])
+            count = int(await r.get(key) or 0)
+            ttl = await r.ttl(key)
+            result.append({
+                "user_id": user_id,
+                "requests_used": count,
+                "requests_remaining": max(0, RATE_LIMIT_REQUESTS - count),
+                "ttl_seconds": ttl,
+            })
+        return sorted(result, key=lambda x: x["requests_used"], reverse=True)
+    except Exception as e:
+        log.warning("get_all_rate_limits error: %s", e)
+        return []
+
+
+async def reset_rate_limit(user_id: int) -> bool:
+    """Сбрасывает счётчик rate limit для пользователя. Возвращает True если ключ существовал."""
+    try:
+        deleted = await get_redis().delete(_ratelimit_key(user_id))
+        return deleted > 0
+    except Exception as e:
+        log.warning("reset_rate_limit error: %s", e)
+        return False
