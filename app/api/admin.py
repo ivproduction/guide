@@ -319,6 +319,17 @@ def delete_ingest(
     return {"filename": filename, "collection": coll, "deleted_chunks": deleted}
 
 
+@router.delete("/files/raw/{filename}", summary="Удалить файл только из data/raw/")
+def delete_raw_file(filename: str):
+    """Удаляет файл из data/raw/ не трогая docs и эмбеддинги."""
+    raw_path = RAW_DIR / filename
+    if not raw_path.exists():
+        raise HTTPException(status_code=404, detail=f"{filename} не найден в data/raw/")
+    raw_path.unlink()
+    log.info("Удалён raw файл: %s", filename)
+    return {"deleted": filename}
+
+
 @router.delete("/files/{filename}", summary="Полностью удалить файл: raw + docs + эмбеддинги")
 def delete_file(filename: str, source_type: str = "session_guides"):
     """
