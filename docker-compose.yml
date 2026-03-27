@@ -4,8 +4,25 @@ services:
     build: .
     ports:
       - "8000:8000"
-    env_file:
-      - .env.docker
+    environment:
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_MODE: ${TELEGRAM_MODE:-polling}
+      WEBHOOK_URL: ${WEBHOOK_URL:-}
+      WEBHOOK_PATH: ${WEBHOOK_PATH:-/webhook/telegram}
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      QDRANT_HOST: ${QDRANT_HOST:-qdrant}
+      QDRANT_PORT: ${QDRANT_PORT:-6333}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-gemini-embedding-2-preview}
+      EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-768}
+      RAG_RESPONSE_MODEL: ${RAG_RESPONSE_MODEL:-gemini-3-flash-preview}
+      PDF_PROCESSING_MODEL: ${PDF_PROCESSING_MODEL:-gemini-1.5-flash}
+      TOP_K: ${TOP_K:-5}
+      CACHE_TTL_DAYS: ${CACHE_TTL_DAYS:-30}
+      HISTORY_TTL_DAYS: ${HISTORY_TTL_DAYS:-14}
+      HISTORY_MAX_MESSAGES: ${HISTORY_MAX_MESSAGES:-28}
+      LOG_TO_FILE: ${LOG_TO_FILE:-false}
     depends_on:
       redis:
         condition: service_healthy
@@ -42,16 +59,14 @@ services:
     image: postgres:16-alpine
     ports:
       - "5432:5432"
-    env_file:
-      - .env.docker
     environment:
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-psychoai}
+      POSTGRES_USER: ${POSTGRES_USER:-psychoai}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-psychoai} -d ${POSTGRES_DB:-psychoai}"]
       interval: 5s
       timeout: 3s
       retries: 10
