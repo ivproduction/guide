@@ -24,7 +24,7 @@ from ragas.metrics._faithfulness import Faithfulness
 from ragas.metrics._answer_relevance import AnswerRelevancy
 from ragas.metrics._context_precision import LLMContextPrecisionWithoutReference
 
-from app.config import EMBEDDING_MODEL, GEMINI_API_KEY, RAG_RESPONSE_MODEL, RAGAS_DIR, TOP_K
+from app.config import EMBEDDING_MODEL, GEMINI_API_KEY, RAGAS_DIR, RAGAS_MODEL, TOP_K
 from app.services.cache import delete_cached
 from app.services.rag import ask as rag_ask
 from app.services.search import search
@@ -35,7 +35,7 @@ log = logging.getLogger(__name__)
 
 def _get_ragas_llm():
     llm = ChatGoogleGenerativeAI(
-        model=RAG_RESPONSE_MODEL,
+        model=RAGAS_MODEL,
         google_api_key=GEMINI_API_KEY,
         temperature=0,
     )
@@ -89,7 +89,7 @@ async def evaluate_rag(
         "retrieved_contexts": all_contexts,
     })
 
-    log.info("  Запускаю RAGAS evaluate (judge: %s)...", RAG_RESPONSE_MODEL)
+    log.info("  Запускаю RAGAS evaluate (judge: %s)...", RAGAS_MODEL)
 
     ragas_llm = _get_ragas_llm()
     ragas_emb = _get_ragas_embeddings()
