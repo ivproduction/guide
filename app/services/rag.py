@@ -9,6 +9,7 @@ TODO (следующий этап):
   - персонализация ответа под конкретного пользователя
 """
 
+import asyncio
 import logging
 import time
 from typing import Literal
@@ -17,7 +18,7 @@ from google import genai as google_genai
 
 from app.config import GEMINI_API_KEY, RAG_RESPONSE_MODEL, TOP_K
 from app.services.cache import get_cached, set_cached
-from app.services.search import search
+from app.services.search import search as _search_sync
 
 log = logging.getLogger(__name__)
 
@@ -117,7 +118,7 @@ async def ask(
 
     # ── Поиск в Qdrant ─────────────────────────────────────────
     t0 = time.perf_counter()
-    chunks = search(query=question, source_type=source_type, mode=mode, top_k=top_k)
+    chunks = await asyncio.to_thread(_search_sync, question, source_type, mode, top_k)
     t_search = time.perf_counter() - t0
 
     if not chunks:
@@ -150,7 +151,8 @@ async def ask(
              RAG_RESPONSE_MODEL, channel, context_chars, prompt_chars)
 
     t0 = time.perf_counter()
-    response = _genai.models.generate_content(
+    response = await asyncio.to_thread(
+        _genai.models.generate_content,
         model=RAG_RESPONSE_MODEL,
         contents=[system_prompt, prompt],
     )
