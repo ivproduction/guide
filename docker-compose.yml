@@ -2,14 +2,17 @@ services:
 
   app:
     build: .
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
+    networks:
+      - caddy-public
+      - default
     environment:
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       TELEGRAM_MODE: ${TELEGRAM_MODE:-polling}
       WEBHOOK_URL: ${WEBHOOK_URL:-}
-      WEBHOOK_PATH: ${WEBHOOK_PATH:-/webhook/telegram}
+      WEBHOOK_PATH: ${WEBHOOK_PATH:-/webhook/gestalt-supervisor}
       REDIS_HOST: ${REDIS_HOST:-redis}
       REDIS_PORT: ${REDIS_PORT:-6379}
       QDRANT_HOST: ${QDRANT_HOST:-qdrant}
@@ -77,3 +80,8 @@ volumes:
   redis_data:
   qdrant_data:
   postgres_data:
+
+networks:
+  caddy-public:
+    external: true
+  default:
