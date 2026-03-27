@@ -8,11 +8,12 @@ TODO: добавить историю диалога, персонализаци
 
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Security
 
+from app.api.admin import require_api_key
 from app.services import rag
 
-router = APIRouter(prefix="/api/app", tags=["app"])
+router = APIRouter(prefix="/api/app", tags=["app"], dependencies=[Security(require_api_key)])
 
 
 @router.post("/ask", summary="Задать вопрос супервизору")
