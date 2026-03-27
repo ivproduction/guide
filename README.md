@@ -1,93 +1,264 @@
 # Супервизор в кармане
 
-RAG-ассистент для начинающих гештальт-терапевтов. Отвечает на вопросы по теории и практике, опираясь на базу знаний из книг по гештальт-терапии.
+> RAG-ассистент для начинающих гештальт-терапевтов.
+> Отвечает на вопросы по теории и практике, опираясь на профессиональную литературу — как опытный коллега, а не поисковик.
+
+---
+
+## Что это
+
+Telegram-бот, который помогает начинающим гештальт-терапевтам разбираться в сложных ситуациях на сессии. Вместо того чтобы лезть в книгу или ждать следующей супервизии — терапевт пишет вопрос и получает развёрнутый ответ.
+
+**Примеры вопросов:**
+- *«Клиент хочет завершить терапию после двух встреч — что делать?»*
+- *«Как работать с человеком, который всё время интеллектуализирует?»*
+- *«Чувствую, что этот клиент меня раздражает — это нормально?»*
+- *«Что такое ретрофлексия и как её распознать на сессии?»*
+
+---
+
+## База знаний
+
+| Книга | Автор | Что даёт |
+|---|---|---|
+| *Skills in Gestalt Counselling & Psychotherapy* (3rd ed.) | Phil Joyce & Charlotte Sills | Практика ведения сессии: контакт, эксперименты, завершение |
+| *Gestalt Therapy: 100 Key Points and Techniques* (2nd ed.) | Dave Mann | Концентрированный разбор ключевых идей и техник |
+
+---
 
 ## Стек
 
-- **FastAPI** — REST API + Swagger UI
-- **Qdrant** — векторное хранилище чанков
-- **Gemini** — эмбеддинги + генерация ответов
-- **Redis** — кэш ответов (TTL 30 дней)
-- **RAGAS** — оценка качества RAG пайплайна
-- **Docker Compose** — оркестрация сервисов
+| Компонент | Технология | Роль |
+|---|---|---|
+| API + Admin | **FastAPI** | REST API, Swagger UI |
+| Telegram бот | **python-telegram-bot** | polling (локально) / webhook (VPS) |
+| Векторная БД | **Qdrant** | хранение и поиск по эмбеддингам |
+| LLM + эмбеддинги | **Google Gemini** | конвертация PDF, эмбеддинги, генерация ответов |
+| Кэш | **Redis** | кэш ответов TTL 30 дней |
+| Оценка качества | **RAGAS** | faithfulness, relevancy, precision |
+| Оркестрация | **Docker Compose** | 4 сервиса, персистентные volumes |
+
+---
 
 ## Быстрый старт
 
 ```bash
-cp .env.docker .env.docker  # настрой API ключи
+# 1. Настрой переменные окружения
+cp .env.docker .env.docker   # вставь GEMINI_API_KEY и TELEGRAM_BOT_TOKEN
+
+# 2. Запусти
 docker compose up --build -d
+
+# 3. Открой Swagger
+open http://localhost:8000/swagger
 ```
 
-Swagger UI: http://localhost:8000/docs
+---
 
 ## Локальная разработка
 
 ```bash
-cp .env.docker .env         # скопируй и поправь хосты на localhost
-uv run uvicorn app.main:app --reload --port 8005
+# Настрой .env (хосты на localhost, polling-режим бота)
+cp .env.example .env
+# Заполни GEMINI_API_KEY, TELEGRAM_BOT_TOKEN
+# TELEGRAM_MODE=polling уже стоит по умолчанию
+
+# Запусти инфраструктуру (redis, qdrant, postgres)
+docker compose up redis qdrant postgres -d
+
+# Запусти приложение локально
+uv run uvicorn app.main:app --reload
 ```
 
-Swagger UI: http://localhost:8005/docs
+Swagger UI: http://localhost:8000/swagger
 
-## Структура
+---
+
+## Пайплайн добавления книги
 
 ```
-app/
-├── api/
-│   ├── admin.py     # /admin/* — загрузка файлов, инжест, поиск, RAGAS
-│   └── chat.py      # /app/* — RAG чат
-├── ragas/
-│   ├── eval.py      # логика RAGAS оценки
-│   └── questions.py # тест-вопросы (редактируй здесь)
-├── services/
-│   ├── rag.py       # RAG пайплайн: поиск + генерация
-│   ├── search.py    # семантический поиск по Qdrant
-│   └── cache.py     # Redis кэш
-├── ingest/          # конвертация PDF → текст (standard / smart)
-├── vector_store.py  # чанкинг + эмбеддинг + загрузка в Qdrant
-└── config.py        # конфигурация из .env
+1. Загрузить PDF
+   POST /api/admin/files/upload
 
-data/
-├── raw/             # исходные PDF
-├── docs/            # конвертированные тексты
-└── ragas/           # отчёты RAGAS оценки
+2. Конвертировать PDF → Semantic Markdown (Gemini Vision, ~2-3 мин)
+   POST /api/admin/files/convert?filename=book.pdf&mode=smart&source_type=session_guides
+
+3. Загрузить в Qdrant (эмбеддинги)
+   POST /api/admin/files/ingest?filename=smart:book.txt&source_type=session_guides
+
+4. Проверить качество поиска
+   GET /api/admin/search?query=сопротивление&source_type=session_guides&mode=smart
 ```
 
-## Коллекции Qdrant
+**Smart vs Standard:**
+- `smart` — Gemini Vision читает PDF как визуальный объект, понимает двухколоночный layout, таблицы, схемы → качество RAG выше на 30-40%
+- `standard` — pymupdf4llm, быстро, но теряет структуру сложных макетов
 
-Имя коллекции: `{source_type}_{mode}`
-
-Примеры: `session_guides_smart`, `session_guides_standard`
+---
 
 ## RAG пайплайн
 
 ```
-вопрос → Gemini Embeddings → Qdrant top-5 → Gemini Flash → ответ → Redis кэш
+вопрос пользователя
+  │
+  ├─→ Redis cache?  ──HIT──→  вернуть кэш (мгновенно)
+  │
+  MISS
+  │
+  ├─→ Gemini Embeddings: вопрос → вектор 768d
+  ├─→ Qdrant: cosine similarity → top-5 чанков
+  ├─→ Gemini: [system_prompt] + [5 чанков] + вопрос → ответ
+  │
+  ├─→ Redis: сохранить ответ (TTL 30 дней)
+  └─→ вернуть ответ
 ```
 
-## RAGAS оценка
+**Коллекции Qdrant:** `{source_type}_{mode}` — например `session_guides_smart`
 
-```bash
-# Запустить оценку (фоново, 3-5 минут)
-POST /admin/ragas
+**Каналы:**
+- `api` — обычный текст (для HTTP API)
+- `telegram` — HTML-форматирование с эмодзи, адаптировано под мобильный экран
 
-# Проверить результаты
-GET /admin/ragas/results?last=1
+---
+
+## Admin API
+
+Swagger: `http://localhost:8000/swagger`
+
+### Управление файлами
+
+| Метод | Endpoint | Описание |
+|---|---|---|
+| `POST` | `/api/admin/files/upload` | Загрузить PDF в `data/raw/` |
+| `GET` | `/api/admin/files/status` | Статус всех PDF: конвертация + наличие в Qdrant |
+| `POST` | `/api/admin/files/convert` | PDF → Semantic Markdown (Gemini Vision) |
+| `GET` | `/api/admin/files/docs` | Список конвертированных текстов |
+| `POST` | `/api/admin/files/ingest` | Текст → Qdrant (эмбеддинги) |
+| `DELETE` | `/api/admin/files/ingest` | Удалить чанки файла из Qdrant |
+
+### Отладка и обслуживание
+
+| Метод | Endpoint | Описание |
+|---|---|---|
+| `GET` | `/api/admin/search` | Семантический поиск (проверка качества) |
+| `GET` | `/api/admin/collections` | Статус коллекций Qdrant |
+| `DELETE` | `/api/admin/cache` | Сбросить Redis кэш |
+
+### RAGAS оценка качества
+
+| Метод | Endpoint | Описание |
+|---|---|---|
+| `POST` | `/api/admin/ragas` | Запустить оценку (фоново, ~3-5 минут) |
+| `GET` | `/api/admin/ragas/results` | Последние N результатов |
+
+**Метрики RAGAS:**
+- `faithfulness` — ответ основан на контексте (нет галлюцинаций)
+- `answer_relevancy` — ответ релевантен вопросу
+- `context_precision` — найденные чанки действительно нужны
+
+**Последние результаты (2026-03-27):**
+```
+faithfulness:      0.692   (~30% ответов содержат выводы из общих знаний модели)
+answer_relevancy:  0.767   (ответы по теме, есть куда расти)
+context_precision: 1.000   (Qdrant находит только нужные чанки — отлично)
 ```
 
-Метрики:
-- **faithfulness** — ответ основан на контексте (нет галлюцинаций)
-- **answer_relevancy** — ответ релевантен вопросу
-- **context_precision** — найденные чанки действительно нужны
+---
+
+## Telegram бот
+
+**Команды:**
+- `/start` — приветствие с примерами вопросов
+- `/help` — описание системы, список книг, примеры ситуаций
+
+**Режимы запуска** (переключается через `TELEGRAM_MODE`):
+- `polling` — для локальной разработки, не нужен публичный URL
+- `webhook` — для VPS с nginx + SSL, Telegram сам шлёт запросы на сервер
+
+---
+
+## Docker сервисы
+
+| Сервис | Образ | Порт | Данные |
+|---|---|---|---|
+| `app` | python:3.11-slim | 8000 | `app_data:/app/data` |
+| `redis` | redis:7-alpine | 6379 | `redis_data:/data` |
+| `qdrant` | qdrant/qdrant | 6333 | `qdrant_data:/qdrant/storage` |
+| `postgres` | postgres:16-alpine | 5432 | `postgres_data:/var/lib/postgresql/data` |
+
+Все данные хранятся в Docker volumes — переживают `docker compose down`.
+
+---
 
 ## Переменные окружения
 
-| Переменная | Описание |
-|---|---|
-| `GEMINI_API_KEY` | API ключ Google Gemini |
-| `EMBEDDING_MODEL` | модель для эмбеддингов |
-| `RAG_RESPONSE_MODEL` | модель для генерации ответов |
-| `PDF_PROCESSING_MODEL` | модель для конвертации PDF (smart mode) |
-| `TOP_K` | количество чанков для контекста |
-| `CACHE_TTL_DAYS` | TTL кэша ответов |
-| `LOG_TO_FILE` | писать логи в app.log (только локально) |
+| Переменная | По умолчанию | Описание |
+|---|---|---|
+| `GEMINI_API_KEY` | — | API ключ Google Gemini (обязательно) |
+| `TELEGRAM_BOT_TOKEN` | — | Токен бота от @BotFather (обязательно) |
+| `TELEGRAM_MODE` | `polling` | `polling` или `webhook` |
+| `WEBHOOK_URL` | — | Публичный HTTPS-адрес (только для webhook) |
+| `WEBHOOK_PATH` | `/webhook/telegram` | Путь вебхука |
+| `RAG_RESPONSE_MODEL` | `gemini-3-flash-preview` | Модель генерации ответов |
+| `PDF_PROCESSING_MODEL` | `gemini-1.5-flash` | Модель конвертации PDF |
+| `EMBEDDING_MODEL` | `gemini-embedding-2-preview` | Модель эмбеддингов |
+| `EMBEDDING_DIMENSION` | `768` | Размерность вектора |
+| `TOP_K` | `5` | Количество чанков для контекста |
+| `CACHE_TTL_DAYS` | `30` | TTL кэша ответов (дней) |
+| `LOG_TO_FILE` | `false` | Писать логи в `app.log` |
+
+---
+
+## Структура проекта
+
+```
+guide/
+├── docker-compose.yml
+├── Dockerfile
+├── pyproject.toml
+├── .env.example          ← шаблон переменных
+├── .env.docker           ← переменные для Docker
+│
+├── app/
+│   ├── main.py           ← FastAPI + lifespan (бот) + webhook route
+│   ├── config.py         ← все настройки из .env
+│   │
+│   ├── api/
+│   │   ├── admin.py      ← /api/admin/*
+│   │   └── chat.py       ← /api/app/*
+│   │
+│   ├── bot/
+│   │   └── handlers.py   ← Telegram: команды, обработка сообщений
+│   │
+│   ├── services/
+│   │   ├── rag.py        ← RAG пайплайн
+│   │   ├── search.py     ← поиск в Qdrant
+│   │   └── cache.py      ← Redis кэш
+│   │
+│   ├── ingest/
+│   │   ├── smart.py      ← Gemini Vision → Semantic Markdown
+│   │   └── standard.py   ← pymupdf4llm → текст
+│   │
+│   ├── ragas/
+│   │   ├── eval.py       ← оценка качества
+│   │   └── questions.py  ← тест-вопросы (редактируй здесь)
+│   │
+│   └── vector_store.py   ← чанкинг + эмбеддинг + Qdrant
+│
+└── data/                 ← Docker volume (персистентно)
+    ├── raw/              ← исходные PDF
+    ├── docs/
+    │   ├── smart/        ← Semantic Markdown
+    │   └── standard/     ← plain text
+    └── ragas/            ← JSON-отчёты оценки
+```
+
+---
+
+## Что дальше (TODO)
+
+- **История диалога** — бот будет помнить контекст разговора с конкретным терапевтом
+- **Персонализация** — адаптация ответа под историю пользователя
+- **База пользователей** — PostgreSQL: регистрация, подписки
+- **Голосовые сообщения** — Gemini Audio API
+- **Перевод базы знаний** — русскоязычные чанки для лучшего поиска

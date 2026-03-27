@@ -1,9 +1,9 @@
 """
 api/chat.py — основные пользовательские эндпоинты.
-Префикс: /app
+Префикс: /api/app
 
 Текущая реализация: RAG без истории (база знаний).
-TODO: добавить историю диалога, регистрацию пользователей.
+TODO: добавить историю диалога, персонализацию по user_id.
 """
 
 from typing import Literal
@@ -12,7 +12,7 @@ from fastapi import APIRouter, HTTPException
 
 from app.services import rag
 
-router = APIRouter(prefix="/app", tags=["app"])
+router = APIRouter(prefix="/api/app", tags=["app"])
 
 
 @router.post("/ask", summary="Задать вопрос супервизору")

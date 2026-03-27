@@ -5,55 +5,60 @@
 ### Этап 1. Инфраструктура ✅
 - [x] `docker-compose.yml` — 4 сервиса: app, redis, qdrant, postgres
 - [x] `.env.example` — все переменные окружения
-- [x] `Dockerfile` с uv
-- [x] Проверка: `docker compose up` — все сервисы стартуют
+- [x] `Dockerfile` с uv (Python 3.11)
+- [x] Персистентные данные через Docker volumes (app_data, redis_data, qdrant_data)
 
 ### Этап 2. Подготовка данных ✅
-- [x] `ingest_standard.py` — pymupdf4llm → очистка → `data/docs/standard/`
-- [x] `ingest_smart.py` — Gemini Vision → Semantic Markdown → `data/docs/smart/`
-- [x] Данные: `smart/joyce_sills.txt` (247k), `smart/mann_100_key_points.txt` (41k)
-- [x] Проверка: качество smart >> standard (566 чанков vs 15 для joyce_sills)
+- [x] `ingest/standard.py` — pymupdf4llm → очистка → `data/docs/standard/`
+- [x] `ingest/smart.py` — Gemini Vision → Semantic Markdown → `data/docs/smart/`
+- [x] Данные: `smart/joyce_sills.txt`, `smart/mann_100_key_points.txt`
 
-### Этап 3. База данных ⏳ (пропущен пока)
-- [ ] `app/db/models.py` — SQLAlchemy модели (users, subscriptions, audio_messages, evaluations)
+### Этап 3. База данных ⏳ (отложено)
+- [ ] `app/db/models.py` — SQLAlchemy модели (users, subscriptions)
 - [ ] `app/db/database.py` — подключение к PostgreSQL
-- [ ] `app/db/migrations/` — Alembic, первая миграция
-- [ ] Проверка: `alembic upgrade head` — таблицы созданы
+- [ ] Alembic миграции
 
 ### Этап 4. Векторное хранилище ✅
-- [x] `app/vector_store.py` — Qdrant + чанкинг (800/100) + эмбеддинги Gemini
-- [x] `app/config.py` — все настройки из env
-- [x] Данные в Qdrant: `gestalt_smart` = 648 чанков, `gestalt_standard` = 82 чанка
+- [x] `app/vector_store.py` — Qdrant + чанкинг + эмбеддинги Gemini
+- [x] `app/services/search.py` — семантический поиск
+- [x] Динамические коллекции: `{source_type}_{mode}`
 
-### Этап 5. Кэш и история ⬜
-- [ ] `app/cache.py` — Redis кэш ответов (TTL 30д) + история (28 сообщ, TTL 14д)
-- [ ] Проверка: сохранить/получить из кэша, проверить TTL
+### Этап 5. Кэш ✅
+- [x] `app/services/cache.py` — Redis кэш ответов (TTL 30д)
+- [x] Структура для истории (get_history/push_history) — готова, но не подключена к RAG
 
-### Этап 6. RAG пайплайн ⬜
-- [ ] `app/rag_pipeline.py` — поиск в Qdrant + двухшаговая генерация через Gemini
-- [ ] Проверка: задать вопрос, получить ответ, повторить — второй раз из кэша
+### Этап 6. RAG пайплайн ✅
+- [x] `app/services/rag.py` — поиск в Qdrant + генерация через Gemini
+- [x] Кэш ответов (Redis)
+- [x] Каналы: `api` и `telegram` (разные промпты)
 
-### Этап 7. Admin API ✅ (частично)
-- [x] `app/admin.py` — FastAPI + Swagger UI на порту 8000
-- [x] `POST /admin/convert` — PDF → текст
-- [x] `POST /admin/embed` — текст → Qdrant
-- [x] `GET /admin/collections` — статус коллекций
-- [ ] `POST /admin/search` — тестовый поиск по вопросу
-- [ ] `POST /admin/cache/flush` — сброс Redis
-- [ ] `POST /admin/ragas` — запуск оценки качества
+### Этап 7. Admin API ✅
+- [x] Swagger UI: `/swagger`
+- [x] `POST /api/admin/files/upload` — загрузка PDF
+- [x] `GET /api/admin/files/status` — статус файлов с инфо из Qdrant
+- [x] `POST /api/admin/files/convert` — PDF → Semantic Markdown
+- [x] `GET /api/admin/files/docs` — список готовых текстов
+- [x] `POST /api/admin/files/ingest` — текст → Qdrant
+- [x] `DELETE /api/admin/files/ingest` — удалить чанки файла
+- [x] `GET /api/admin/search` — семантический поиск (дебаг)
+- [x] `DELETE /api/admin/cache` — сброс Redis кэша
+- [x] `GET /api/admin/collections` — статус коллекций Qdrant
+- [x] `POST /api/admin/ragas` — запуск RAGAS оценки (фоново)
+- [x] `GET /api/admin/ragas/results` — результаты оценки
 
-### Этап 8. Telegram бот ⬜
-- [ ] `app/main.py` — handlers, регистрация пользователя, отправка вопроса в пайплайн
-- [ ] Проверка: написать боту вопрос, получить ответ
+### Этап 8. Telegram бот ✅
+- [x] `app/bot/handlers.py` — polling и webhook режимы
+- [x] `/start` — приветственное сообщение с примерами
+- [x] `/help` — описание системы и базы знаний
+- [x] Обработка сообщений → RAG → HTML-ответ
+- [x] Разбивка длинных ответов (лимит 4096 символов)
 
 ---
 
-## Текущий этап
+## Следующие этапы (TODO)
 
-**→ Этап 5 + 6: cache.py + rag_pipeline.py**
-
-Рекомендуемый порядок:
-1. `app/cache.py` — Redis
-2. `app/rag_pipeline.py` — поиск + генерация
-3. `POST /admin/search` в admin.py — проверить в Swagger
-4. Потом DB (Этап 3) и бот (Этап 8)
+- [ ] **История диалога** — подключить `get_history/push_history` к RAG пайплайну
+- [ ] **Персонализация** — адаптировать ответ под контекст конкретного пользователя
+- [ ] **База данных пользователей** — регистрация, подписки (Этап 3)
+- [ ] **Голосовые сообщения** — Gemini Audio API
+- [ ] **Перевод базы знаний** — русскоязычные чанки для лучшего поиска

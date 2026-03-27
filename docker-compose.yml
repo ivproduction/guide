@@ -13,6 +13,8 @@ services:
         condition: service_healthy
       qdrant:
         condition: service_started
+    volumes:
+      - app_data:/app/data
     restart: unless-stopped
 
   redis:
@@ -56,6 +58,7 @@ services:
     restart: unless-stopped
 
 volumes:
+  app_data:
   redis_data:
   qdrant_data:
   postgres_data:

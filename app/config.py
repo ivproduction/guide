@@ -19,6 +19,11 @@ PDF_PROCESSING_MODEL: str = os.getenv("PDF_PROCESSING_MODEL", "gemini-1.5-flash"
 TOP_K: int = int(os.getenv("TOP_K", "5"))
 LOG_TO_FILE: bool = os.getenv("LOG_TO_FILE", "false").lower() == "true"
 
+TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_MODE: str = os.getenv("TELEGRAM_MODE", "polling")   # polling | webhook
+WEBHOOK_URL: str = os.getenv("WEBHOOK_URL", "")              # https://yourdomain.com
+WEBHOOK_PATH: str = os.getenv("WEBHOOK_PATH", "/webhook/telegram")
+
 RAW_DIR = Path("data/raw")
 DOCS_DIR = {
     "standard": Path("data/docs/standard"),

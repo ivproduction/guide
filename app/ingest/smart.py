@@ -20,16 +20,16 @@ log = logging.getLogger(__name__)
 
 _genai = google_genai.Client(api_key=GEMINI_API_KEY)
 
-PROMPT = """You are a document processing assistant.
-Convert this PDF to clean, search-optimized Markdown for a RAG knowledge base.
+PROMPT = """You are a document processing assistant preparing content for a RAG knowledge base.
+Analyze this PDF and rewrite its content in your own words as structured Markdown.
 
 Rules:
-- Preserve all headings with proper hierarchy (# ## ###)
-- Keep all text content intact
+- Use proper heading hierarchy (# ## ###) based on document structure
+- Rewrite and paraphrase all content — do not quote verbatim
+- Summarize key ideas, concepts, and practical guidance
 - Convert tables to Markdown tables
-- Describe diagrams and figures in text: [Figure: brief description of what is shown]
-- Remove page numbers, running headers, footers
-- Remove copyright notices and publishing information
+- Describe diagrams and figures: [Figure: brief description]
+- Skip page numbers, running headers, footers, copyright notices
 - Output ONLY the Markdown content, no explanations or meta-commentary"""
 
 
@@ -45,6 +45,8 @@ def convert(pdf_path: Path) -> str:
             contents=[uploaded, PROMPT],
         )
         md_text = response.text
+        if not md_text:
+            raise ValueError(f"Gemini вернул пустой ответ. finish_reason={response.candidates[0].finish_reason if response.candidates else 'unknown'}")
         log.info("  [smart] Получено %d символов", len(md_text))
     finally:
         _genai.files.delete(name=uploaded.name)

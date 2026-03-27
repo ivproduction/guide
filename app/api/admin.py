@@ -1,7 +1,7 @@
 """
 api/admin.py — Admin API.
-Swagger UI: http://localhost:8000/docs
-Префикс: /admin
+Swagger UI: http://localhost:8000/swagger
+Префикс: /api/admin
 """
 
 import asyncio
@@ -26,7 +26,7 @@ from app.vector_store import delete_file_chunks, ingest_to_qdrant
 
 log = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/admin", tags=["admin"])
+router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 
 # ── 1. Загрузка файла ──────────────────────────────────────────
@@ -46,15 +46,15 @@ async def upload_file(file: UploadFile = File(...)):
     return {"filename": file.filename, "size_mb": size_mb, "path": str(dest)}
 
 
-# ── 2. Список файлов со статусом эмбеддинга ───────────────────
+# ── 2. Список файлов со статусом ──────────────────────────────
 
-@router.get("/files", summary="Список файлов и статус эмбеддинга")
-def list_files():
+@router.get("/files/status", summary="PDF файлы: статус конвертации и эмбеддингов")
+def list_raw_files():
     """
-    Возвращает все PDF из data/raw/ с информацией:
-    - размер файла
-    - конвертирован ли (standard/smart)
-    - загружен ли в Qdrant (какая коллекция, сколько чанков)
+    Все PDF из data/raw/ с полным статусом:
+    - размер и дата загрузки
+    - конвертирован ли в текст (standard/smart)
+    - загружен ли в Qdrant (коллекция, кол-во чанков, превью)
     """
     pdf_files = sorted(RAW_DIR.glob("*.pdf"))
     if not pdf_files:
@@ -74,7 +74,6 @@ def list_files():
             "embeddings": {},
         }
 
-        # Проверяем наличие .meta.json для каждого режима
         for mode in ("standard", "smart"):
             safe_stem = pdf_path.stem.replace(" ", "_")
             meta_path = DOCS_DIR[mode] / f"{safe_stem}.meta.json"
@@ -85,7 +84,6 @@ def list_files():
                     "source_type": meta.get("source_type"),
                 }
 
-        # Проверяем чанки в Qdrant по всем коллекциям
         file_filter = Filter(
             must=[FieldCondition(key="source_file", match=MatchValue(value=pdf_path.name))]
         )
@@ -134,53 +132,114 @@ def list_files():
     return result
 
 
-# ── 3. Инжест файла ───────────────────────────────────────────
+# ── 3b. Конвертация PDF → Semantic Markdown ───────────────────
 
-@router.post("/files/ingest", summary="Конвертировать и загрузить в Qdrant")
-def ingest_file(
+@router.post("/files/convert", summary="PDF → Semantic Markdown (data/docs/)")
+def convert_file_endpoint(
     filename: str,
     mode: Literal["standard", "smart"] = "smart",
     source_type: str = "session_guides",
 ):
     """
-    Полный пайплайн для одного файла: PDF → текст → чанки → Qdrant.
+    Шаг 1: конвертирует PDF в текст и сохраняет в data/docs/{mode}/.
 
-    - **filename** — имя файла в data/raw/ (например: `джойс силлс.pdf`)
-    - **mode** — standard (быстро) или smart (Gemini Vision, медленно)
-    - **source_type** — тип источника, определяет коллекцию: `session_guides`, `therapist_finder`, ...
+    - **filename** — имя PDF из data/raw/ (см. GET /admin/files/raw)
+    - **mode** — `smart` (Gemini Vision, медленно, качественно) или `standard` (быстро)
+    - **source_type** — метка источника: `session_guides`, `therapist_finder`, ...
+
+    После успеха используй POST /admin/files/ingest для загрузки в Qdrant.
     """
     pdf_path = RAW_DIR / filename
     if not pdf_path.exists():
-        raise HTTPException(status_code=404, detail=f"Файл не найден: {filename}")
+        raise HTTPException(status_code=404, detail=f"Файл не найден в data/raw/: {filename}")
 
-    log.info("=== INGEST [%s / %s] %s ===", source_type, mode, filename)
-
-    # Конвертация PDF → текст
+    log.info("=== CONVERT [%s / %s] %s ===", source_type, mode, filename)
     try:
-        convert_result = convert_file(pdf_path, mode, source_type)
+        result = convert_file(pdf_path, mode, source_type)
     except Exception as e:
+        log.exception("Ошибка конвертации %s: %s", filename, e)
         raise HTTPException(status_code=500, detail=f"Ошибка конвертации: {e}")
 
-    # Читаем сохранённый текст
-    txt_path = DOCS_DIR[mode] / convert_result["output"]
-    text = txt_path.read_text(encoding="utf-8")
-
-    # Эмбеддинг → Qdrant
-    try:
-        chunks = ingest_to_qdrant(text, filename, source_type, mode)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Ошибка эмбеддинга: {e}")
-
-    coll = collection_name(source_type, mode)
-    log.info("=== INGEST готово: %d чанков → %s ===", chunks, coll)
-
+    log.info("=== CONVERT готово: %d символов ===", result["chars"])
     return {
         "filename": filename,
         "mode": mode,
         "source_type": source_type,
+        "output": result["output"],
+        "chars": result["chars"],
+    }
+
+
+# ── 3c. Список файлов для инжеста ────────────────────────────
+
+@router.get("/files/docs", summary="Список текстов для инжеста (data/docs/)")
+def list_doc_files():
+    """
+    Возвращает имена файлов в data/docs/ с префиксом режима.
+
+    Формат: `smart:filename.txt` или `standard:filename.txt`
+    """
+    return _list_doc_files()
+
+
+# ── 3d. Инжест текста → Qdrant ────────────────────────────────
+
+def _list_doc_files() -> list[str]:
+    result = []
+    for mode in ("smart", "standard"):
+        for f in sorted(DOCS_DIR[mode].glob("*.txt")):
+            result.append(f"{mode}:{f.name}")
+    return result
+
+
+@router.post("/files/ingest", summary="Semantic Markdown → Qdrant (эмбеддинги)")
+def ingest_file(
+    filename: str,
+    source_type: str = "session_guides",
+):
+    """
+    Шаг 2: загружает текст из data/docs/ в Qdrant.
+
+    - **filename** — файл с префиксом режима. Доступные варианты:
+    """
+    available = _list_doc_files()
+
+    # парсим mode из префикса: "smart:file.txt" → mode=smart, name=file.txt
+    if ":" not in filename:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Укажи режим через префикс: smart:file.txt или standard:file.txt. Доступно: {available}"
+        )
+    mode, name = filename.split(":", 1)
+    if mode not in ("smart", "standard"):
+        raise HTTPException(status_code=400, detail=f"Режим должен быть smart или standard, получено: {mode}")
+
+    txt_path = DOCS_DIR[mode] / name
+    if not txt_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Файл не найден в data/docs/{mode}/: {name}. Доступно: {available}"
+        )
+
+    text = txt_path.read_text(encoding="utf-8")
+    source_file = name.replace("_", " ").removesuffix(".txt") + ".pdf"
+
+    log.info("=== INGEST [%s / %s] %s ===", source_type, mode, name)
+    try:
+        chunks = ingest_to_qdrant(text, source_file, source_type, mode)
+    except Exception as e:
+        log.exception("Ошибка эмбеддинга %s: %s", name, e)
+        raise HTTPException(status_code=500, detail=f"Ошибка эмбеддинга: {e}")
+
+    coll = collection_name(source_type, mode)
+    log.info("=== INGEST готово: %d чанков → %s ===", chunks, coll)
+    return {
+        "filename": name,
+        "mode": mode,
+        "source_type": source_type,
         "collection": coll,
-        "chars": convert_result["chars"],
         "chunks": chunks,
+        "available": available,
     }
 
 
