@@ -7,3 +7,4 @@ data/raw/
 data/docs/
 app.log
 app.log.*
+.secret
