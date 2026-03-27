@@ -75,10 +75,13 @@ async def upload_txt(
 
     smart_dir = DOCS_DIR["smart"]
     smart_dir.mkdir(parents=True, exist_ok=True)
+    RAW_DIR.mkdir(parents=True, exist_ok=True)
 
     basename = Path(file.filename).stem  # polster → polster
     txt_path = smart_dir / f"{basename}.txt"
     content = await file.read()
+
+    (RAW_DIR / file.filename).write_bytes(content)
     txt_path.write_bytes(content)
 
     meta = {
