@@ -109,16 +109,18 @@ def list_raw_files():
     - конвертирован ли в текст (standard/smart)
     - загружен ли в Qdrant (коллекция, кол-во чанков, превью)
     """
-    pdf_files = sorted(RAW_DIR.glob("*.pdf"))
-    if not pdf_files:
+    all_files = sorted(RAW_DIR.glob("*.pdf")) + sorted(RAW_DIR.glob("*.txt"))
+    if not all_files:
         return []
 
     client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
     existing_collections = {c.name for c in client.get_collections().collections}
 
     result = []
-    for pdf_path in pdf_files:
+    for pdf_path in all_files:
         stat = pdf_path.stat()
+        # для TXT — source_file в Qdrant хранится как .pdf (basename.pdf)
+        source_file_key = pdf_path.stem + ".pdf"
         entry = {
             "filename": pdf_path.name,
             "size_mb": round(stat.st_size / 1024 / 1024, 2),
@@ -138,7 +140,7 @@ def list_raw_files():
                 }
 
         file_filter = Filter(
-            must=[FieldCondition(key="source_file", match=MatchValue(value=pdf_path.name))]
+            must=[FieldCondition(key="source_file", match=MatchValue(value=source_file_key))]
         )
         for coll_name in existing_collections:
             try:
@@ -149,7 +151,7 @@ def list_raw_files():
                 )
                 if count_result.count > 0:
                     first3_filter = Filter(must=[
-                        FieldCondition(key="source_file", match=MatchValue(value=pdf_path.name)),
+                        FieldCondition(key="source_file", match=MatchValue(value=source_file_key)),
                         FieldCondition(key="chunk_index", range=Range(gte=0, lte=2)),
                     ])
                     points, _ = client.scroll(
