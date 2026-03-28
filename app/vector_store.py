@@ -8,7 +8,7 @@ from typing import List
 
 from google import genai as google_genai
 from google.genai import types
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
     Distance, FieldCondition, Filter, MatchValue, PointStruct, VectorParams
@@ -65,11 +65,31 @@ def ingest_to_qdrant(
     Коллекция: {source_type}_{mode}
     Возвращает количество загруженных чанков.
     """
-    splitter = RecursiveCharacterTextSplitter(
+    char_splitter = RecursiveCharacterTextSplitter(
         chunk_size=CHUNK_SIZE,
         chunk_overlap=CHUNK_OVERLAP,
     )
-    chunks = [c for c in splitter.split_text(text) if len(c.strip()) >= 50]
+
+    if mode == "smart":
+        # smart-текст содержит ## заголовки — режем по смыслу, крупные секции дробим дополнительно
+        md_splitter = MarkdownHeaderTextSplitter(
+            headers_to_split_on=[("#", "h1"), ("##", "h2"), ("###", "h3")],
+            strip_headers=False,
+        )
+        sections = md_splitter.split_text(text)
+        raw_chunks = []
+        for section in sections:
+            section_text = section.page_content.strip()
+            if not section_text:
+                continue
+            if len(section_text) > CHUNK_SIZE:
+                raw_chunks.extend(char_splitter.split_text(section_text))
+            else:
+                raw_chunks.append(section_text)
+    else:
+        raw_chunks = char_splitter.split_text(text)
+
+    chunks = [c for c in raw_chunks if len(c.strip()) >= 50]
     if not chunks:
         return 0
 
